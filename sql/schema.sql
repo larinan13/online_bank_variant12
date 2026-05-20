@@ -1,166 +1,101 @@
-DROP DATABASE IF EXISTS bank_variant12;
-CREATE DATABASE bank_variant12 
-    CHARACTER SET utf8mb4 
-    COLLATE utf8mb4_unicode_ci;
-USE bank_variant12;
+DROP DATABASE IF EXISTS online_banking_variant12;
+CREATE DATABASE online_banking_variant12 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE online_banking_variant12;
 
--- ==================== СПРАВОЧНИКИ ====================
-
--- Отделы банка
-CREATE TABLE departments (
-    department_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    description TEXT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Должности сотрудников
-CREATE TABLE positions (
-    position_id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(100) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ==================== ОСНОВНЫЕ ТАБЛИЦЫ ====================
-
--- Сотрудники
 CREATE TABLE employees (
     employee_id INT AUTO_INCREMENT PRIMARY KEY,
     last_name VARCHAR(50) NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     patronymic VARCHAR(50),
-    position_id INT NOT NULL,
-    department_id INT NOT NULL,
-    phone VARCHAR(20),
-    email VARCHAR(100),
-    FOREIGN KEY (position_id) REFERENCES positions(position_id),
-    FOREIGN KEY (department_id) REFERENCES departments(department_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    position VARCHAR(100) NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    hire_date DATE NOT NULL,
+    salary DECIMAL(10,2) CHECK (salary > 0)
+);
 
--- Клиенты
 CREATE TABLE clients (
     client_id INT AUTO_INCREMENT PRIMARY KEY,
     last_name VARCHAR(50) NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     patronymic VARCHAR(50),
-    phone VARCHAR(20) NOT NULL UNIQUE,
+    passport_number VARCHAR(20) NOT NULL UNIQUE,
+    phone VARCHAR(20) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
-    birth_date DATE NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    birth_date DATE NOT NULL,
+    registration_address TEXT,
+    CHECK (birth_date <= CURDATE() - INTERVAL 18 YEAR)
+);
 
--- Кредитные истории
-CREATE TABLE credit_history (
-    history_id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT NOT NULL UNIQUE,
-    rating ENUM('good', 'bad') NOT NULL,
-    FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Типы операций
 CREATE TABLE operations (
     operation_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    type ENUM('consultation', 'deposit', 'credit') NOT NULL,
-    is_large_deposit BOOLEAN DEFAULT FALSE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    operation_name VARCHAR(100) NOT NULL UNIQUE,
+    operation_type ENUM('вклад','консультация','кредит','другое') NOT NULL,
+    min_amount DECIMAL(15,2) DEFAULT 0,
+    max_amount DECIMAL(15,2)
+);
 
--- Записи на обслуживание
-CREATE TABLE appointments (
-    appointment_id INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE credit_histories (
+    credit_id INT AUTO_INCREMENT PRIMARY KEY,
+    client_id INT NOT NULL,
+    credit_score INT NOT NULL CHECK (credit_score BETWEEN 300 AND 850),
+    is_bad_history BOOLEAN DEFAULT FALSE,
+    default_count INT DEFAULT 0 CHECK (default_count >= 0),
+    total_debt DECIMAL(15,2) DEFAULT 0 CHECK (total_debt >= 0),
+    last_check_date DATE NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE
+);
+
+CREATE TABLE bookings (
+    booking_id INT AUTO_INCREMENT PRIMARY KEY,
     client_id INT NOT NULL,
     employee_id INT NOT NULL,
     operation_id INT NOT NULL,
-    appointment_datetime DATETIME NOT NULL,
-    status ENUM('scheduled', 'completed', 'cancelled') DEFAULT 'scheduled',
-    FOREIGN KEY (client_id) REFERENCES clients(client_id),
-    FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
-    FOREIGN KEY (operation_id) REFERENCES operations(operation_id),
-    UNIQUE KEY unique_slot (employee_id, appointment_datetime)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    booking_date DATE NOT NULL,
+    booking_time TIME NOT NULL,
+    amount DECIMAL(15,2),
+    status ENUM('запланировано','проведено','отменено') DEFAULT 'запланировано',
+    FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE RESTRICT,
+    FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE RESTRICT,
+    FOREIGN KEY (operation_id) REFERENCES operations(operation_id) ON DELETE RESTRICT,
+    UNIQUE KEY unique_slot (employee_id, booking_date, booking_time)
+);
 
--- ==================== ТРИГГЕР ====================
-
--- Запрет записи на крупный вклад при плохой кредитной истории
-DELIMITER $$
-CREATE TRIGGER check_credit_before_deposit
-BEFORE INSERT ON appointments
+DELIMITER //
+CREATE TRIGGER check_credit_before_booking
+BEFORE INSERT ON bookings
 FOR EACH ROW
 BEGIN
-    DECLARE v_rating VARCHAR(10);
-    DECLARE v_is_large BOOLEAN;
-    
-    SELECT is_large_deposit INTO v_is_large 
-    FROM operations 
-    WHERE operation_id = NEW.operation_id;
-    
-    IF v_is_large = TRUE THEN
-        SELECT rating INTO v_rating 
-        FROM credit_history 
-        WHERE client_id = NEW.client_id;
-        
-        IF v_rating = 'bad' THEN
-            SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Клиент с плохой кредитной историей не может открыть крупный вклад';
+    DECLARE bad_history BOOLEAN;
+    DECLARE op_type VARCHAR(50);
+    SELECT operation_type INTO op_type FROM operations WHERE operation_id = NEW.operation_id;
+    IF op_type = 'вклад' AND NEW.amount >= 1000000 THEN
+        SELECT is_bad_history INTO bad_history FROM credit_histories WHERE client_id = NEW.client_id;
+        IF bad_history THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Плохая кредитная история – крупный вклад запрещён';
         END IF;
     END IF;
-END$$
+END //
 DELIMITER ;
 
--- ==================== ИНДЕКСЫ ====================
+INSERT INTO employees (last_name, first_name, patronymic, position, department, phone, email, hire_date, salary) VALUES
+('Иванов','Сергей','Александрович','Старший менеджер','Отдел физ.лиц','+74951112233','ivanov@bank.ru','2018-03-15',85000),
+('Петрова','Ольга','Владимировна','Менеджер','Отдел физ.лиц','+74951112244','petrova@bank.ru','2019-06-20',65000),
+('Сидоров','Алексей','Игоревич','Специалист','Депозитный отдел','+74951112255','sidorov@bank.ru','2020-01-10',75000);
 
-CREATE INDEX idx_appointments_datetime ON appointments(appointment_datetime);
-CREATE INDEX idx_appointments_client ON appointments(client_id);
-CREATE INDEX idx_appointments_employee ON appointments(employee_id);
+INSERT INTO clients (last_name, first_name, patronymic, passport_number, phone, email, birth_date, registration_address) VALUES
+('Абрамов','Виктор','Иванович','4501123456','+79161234567','abramov@mail.ru','1985-03-20','Москва, Тверская,15'),
+('Васильев','Константин','Петрович','4503345678','+79163456789','vasiliev@mail.ru','1978-11-05','Москва, Мира,25');
 
--- ==================== ТЕСТОВЫЕ ДАННЫЕ ====================
+INSERT INTO operations (operation_name, operation_type, min_amount, max_amount) VALUES
+('Вклад "Доходный"','вклад',10000,5000000),
+('Консультация по кредитам','консультация',NULL,NULL);
 
--- Отделы
-INSERT INTO departments (name, description) VALUES
-('Отдел вкладов', 'Работа с вкладами и депозитами'),
-('Отдел кредитования', 'Кредиты и ипотека'),
-('Консультации', 'Общие консультации клиентов');
+INSERT INTO credit_histories (client_id, credit_score, is_bad_history, default_count, total_debt, last_check_date) VALUES
+(1,750,FALSE,0,0,'2026-05-01'),
+(2,450,TRUE,5,250000,'2026-05-01');
 
--- Должности
-INSERT INTO positions (title) VALUES
-('Менеджер'),
-('Старший менеджер'),
-('Руководитель отдела');
-
--- Сотрудники
-INSERT INTO employees (last_name, first_name, patronymic, position_id, department_id, phone, email) VALUES
-('Соколова', 'Ольга', 'Михайловна', 2, 1, '+74951112233', 'sokolova@bank.ru'),
-('Кузнецов', 'Иван', 'Сергеевич', 1, 3, '+74951112234', 'kuznetsov@bank.ru'),
-('Васильева', 'Татьяна', 'Андреевна', 3, 1, '+74951112235', 'vasilieva@bank.ru'),
-('Попов', 'Александр', 'Владимирович', 1, 3, '+74951112236', 'popov@bank.ru');
-
--- Клиенты
-INSERT INTO clients (last_name, first_name, patronymic, phone, email, birth_date) VALUES
-('Иванов', 'Александр', 'Петрович', '+79161234567', 'ivanov@example.com', '1985-03-15'),
-('Петрова', 'Мария', 'Сергеевна', '+79162345678', 'petrova@example.com', '1990-07-22'),
-('Сидоров', 'Дмитрий', 'Алексеевич', '+79163456789', 'sidorov@example.com', '1978-11-05'),
-('Козлова', 'Елена', 'Владимировна', '+79164567890', 'kozlova@example.com', '1995-02-18'),
-('Морозов', 'Андрей', 'Игоревич', '+79165678901', 'morozov@example.com', '1982-09-30');
-
--- Кредитные истории
-INSERT INTO credit_history (client_id, rating) VALUES
-(1, 'good'),
-(2, 'good'),
-(3, 'bad'),
-(4, 'good'),
-(5, 'good');
-
--- Операции
-INSERT INTO operations (name, type, is_large_deposit) VALUES
-('Консультация', 'consultation', FALSE),
-('Открытие стандартного вклада', 'deposit', FALSE),
-('Открытие крупного вклада', 'deposit', TRUE),
-('Оформление кредита', 'credit', FALSE);
-
--- Записи
-INSERT INTO appointments (client_id, employee_id, operation_id, appointment_datetime, status) VALUES
-(1, 1, 2, '2026-05-20 10:00:00', 'completed'),
-(1, 3, 1, '2026-05-22 14:00:00', 'completed'),
-(2, 2, 1, '2026-05-21 11:30:00', 'completed'),
-(2, 1, 2, '2026-05-25 09:00:00', 'scheduled'),
-(4, 2, 3, '2026-05-23 15:00:00', 'completed'),
-(5, 1, 2, '2026-05-24 10:00:00', 'completed'),
-(5, 3, 1, '2026-05-26 11:00:00', 'scheduled'),
-(1, 2, 1, '2026-05-27 16:00:00', 'completed');
+INSERT INTO bookings (client_id, employee_id, operation_id, booking_date, booking_time, amount, status) VALUES
+(1,1,1,'2026-05-10','10:00:00',500000,'запланировано'),
+(2,2,1,'2026-05-11','11:00:00',1500000,'запланировано');
