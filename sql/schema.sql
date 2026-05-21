@@ -1,6 +1,6 @@
-DROP DATABASE IF EXISTS online_banking_variant12;
-CREATE DATABASE online_banking_variant12 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE online_banking_variant12;
+DROP DATABASE IF EXISTS online_bank_variant12;
+CREATE DATABASE online_bank_variant12 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE online_bank_variant12;
 
 CREATE TABLE employees (
     employee_id INT AUTO_INCREMENT PRIMARY KEY,
